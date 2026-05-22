@@ -32,7 +32,6 @@ uploaded_file = st.file_uploader("안테나 S1P 파일을 선택하세요", type
 if uploaded_file is not None:
     try:
         # 파일 읽기 및 네트워크 객체 생성
-        # 메모리 상의 파일을 skrf가 읽을 수 있도록 변환
         file_bytes = uploaded_file.read()
         with open("temp.s1p", "wb") as f:
             f.write(file_bytes)
@@ -80,12 +79,12 @@ if uploaded_file is not None:
         else:
             st.write("이미 50Ω 매칭에 가깝거나 순수 저항 성분만 존재합니다.")
 
-        # 4. 스미스 차트 시각화
+        # 4. 스미스 차트 시각화 (에러가 나던 r=0, c=0 부분을 완벽히 제거했습니다!)
         st.subheader("📈 Smith Chart")
         fig, ax = plt.subplots(figsize=(6, 6))
         
-        # skrf 내장 스미스차트 그리기
-        ntwk.plot_s_smith(ax=ax, r=0, c=0, label="Antenna S11")
+        # 에러 수정된 부분
+        ntwk.plot_s_smith(ax=ax, label="Antenna S11")
         
         # 선택한 주파수 포인트에 마커 찍기
         ax.plot(s_target.real, s_target.imag, 'ro', markersize=8, label=f"Target ({freq_mhz:.1f} MHz)")
