@@ -25,7 +25,7 @@ def calc_LC(X, w):
  "인덕터(L)", f"{get_nearest_std(v)}nH", f"{get_nearest_std(v)}를 반환합니다"
  elif X < -0.1:
  v = (-1.0/(w*X))*1e12
- "커패시터(C)", f"{get_nearest_std(v)}pF", get_nearest_std(v)"를 반환합니다
+"커패시터(C)", f"{get_nearest_std(v)}pF", f"{get_nearest_std(v)}를 반환합니다"
  "없음", "0", 0.0 반환
 
 # =========================================================
