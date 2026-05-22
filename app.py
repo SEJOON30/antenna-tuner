@@ -33,7 +33,7 @@ if uploaded_file is not None:
         with open("temp.s1p", "wb") as f:
             f.write(file_bytes)
         
-        # 측정된 데이터 (현재 소자가 반영되어 있는 상태)
+        # 측정된 데이터
         ntwk_measured = rf.Network("temp.s1p")
         
         st.subheader("📊 안테나 기본 정보")
@@ -53,7 +53,7 @@ if uploaded_file is not None:
             format="%.1f"
         )
         
-        # 4. [기억용] 측정할 때 기판에 끼워져 있던 현재 소자 값 입력
+        # 4. 측정할 때 기판에 끼워져 있던 현재 소자 값 입력
         st.subheader("🛠️ 측정 당시 장착되어 있던 소자 (기억용)")
         col1, col2 = st.columns(2)
         
@@ -78,18 +78,14 @@ if uploaded_file is not None:
         w = 2 * np.pi * f_arr
         z0 = 50.0
         
-        # 선택한 주파수의 인덱스 추출
-        target_freq_hz = freq_mhz * 1e6
-        idx = (np.abs(f_arr - target_freq_hz)).argmin()
+        idx = (np.abs(f_arr - (freq_mhz * 1e6))).argmin()
         w_target = w[idx]
         
-        # 1) 측정된 s1p 데이터에서 현재 마커의 임피던스
+        # 1) 현재 마커 임피던스
         z_measured_marker = ntwk_measured.z[idx, 0, 0]
         
-        # 2) [역산] 현재 소자 값을 빼서 "순수 안테나(Raw) 임피던스" 구해내기
+        # 2) [역산] 현재 소자 제거하여 순수 안테나 임피던스 구하기
         z_raw = z_measured_marker
-        
-        # 병렬 소자 제거 (역산)
         if current_shunt_type == "인덕터 (병렬 L)":
             y_raw = 1 / z_raw - 1 / (1j * w_target * (current_shunt_v * 1e-9))
             z_raw = 1 / y_raw
@@ -97,59 +93,70 @@ if uploaded_file is not None:
             y_raw = 1 / z_raw - 1j * w_target * (current_shunt_v * 1e-12)
             z_raw = 1 / y_raw
             
-        # 직렬 소자 제거 (역산)
         if current_serial_type == "인덕터 (직렬 L)":
             z_raw = z_raw - 1j * w_target * (current_serial_v * 1e-9)
         elif current_serial_type == "커패시터 (직렬 C)":
             z_raw = z_raw - 1 / (1j * w_target * (current_serial_v * 1e-12))
             
-        # 3) [자동 튜닝 계산] 순수 안테나(z_raw)에서 50옴으로 가기 위한 매칭 소자 자동 계산
-        # 여기서는 가장 대중적인 [직렬 소자 -> 병렬 소자] 매칭 알고리즘을 타겟으로 합니다.
         r_ant = z_raw.real
         x_ant = z_raw.imag
         
         st.subheader("🔮 최적 튜닝 값 자동 추천 결과")
         
         if r_ant <= 0:
-            st.warning("⚠️ 안테나의 저항 성분이 정상적이지 않습니다. S1P 파일을 확인해 주세요.")
+            st.warning("⚠️ 안테나의 순수 저항 성분이 명확하지 않습니다. 입력한 현재 소자 값을 다시 확인해 주세요.")
         else:
-            # 50옴 매칭을 위한 수식 계산
-            # 병렬-직렬 토폴로지 자동 판별 및 계산
-            if r_ant <= z0: # 안테나 저항이 50옴보다 작을 때 (보통의 케이스)
-                # 병렬 소자 필요 조건 계산
+            # 모든 영역을 커버하는 매칭 알고리즘 (L-통합 매칭 매커니즘)
+            if r_ant <= z0:  # 케이스 A: 안테나 저항이 50옴보다 작을 때 (직렬 후 병렬 구조 추천)
                 tmp = np.sqrt((z0 - r_ant) / r_ant)
                 x_shunt = z0 / tmp
                 x_serial = x_ant + r_ant * tmp
                 
-                # 병렬 C, 직렬 L 매칭 가정 (가장 일반적)
-                req_shunt_c = 1 / (w_target * x_shunt) * 1e12 # pF
-                req_serial_l = x_serial / w_target * 1e9 # nH
-                
-                if req_shunt_c > 0 and req_serial_l > 0:
+                # 병렬 소자 판별
+                req_shunt_c = 1 / (w_target * x_shunt) * 1e12
+                # 직렬 소자 판별
+                if x_serial >= 0:
+                    req_serial_l = x_serial / w_target * 1e9
                     st.success(f"✅ **추천 직렬 소자:** 인덕터(L) **{get_nearest_std(req_serial_l)} nH** (계산값: {req_serial_l:.2f}nH)")
+                else:
+                    req_serial_c = -1 / (w_target * x_serial) * 1e12
+                    st.success(f"✅ **추천 직렬 소자:** 커패시터(C) **{get_nearest_std(req_serial_c)} pF** (계산값: {req_serial_c:.2f}pF)")
+                
+                st.success(f"✅ **추천 병렬 소자:** 커패시터(C) **{get_nearest_std(req_shunt_c)} pF** (계산값: {req_shunt_c:.2f}pF)")
+                
+            else:  # 케이스 B: 안테나 저항이 50옴보다 클 때 (병렬 후 직렬 구조 추천)
+                g_ant = 1 / r_ant
+                b_ant = -x_ant / (r_ant**2 + x_ant**2)
+                g0 = 1 / z0
+                
+                tmp = np.sqrt((g0 - g_ant) / g_ant)
+                b_shunt = g_ant * tmp - b_ant
+                x_serial = 1 / (g0 * tmp)
+                
+                # 병렬 소자 추천
+                if b_shunt >= 0:
+                    req_shunt_c = b_shunt / w_target * 1e12
                     st.success(f"✅ **추천 병렬 소자:** 커패시터(C) **{get_nearest_std(req_shunt_c)} pF** (계산값: {req_shunt_c:.2f}pF)")
                 else:
-                    st.info("💡 기본 토폴로지 외의 매칭 영역입니다. 순수 임피던스 값을 기반으로 수동 튜닝을 권장합니다.")
-            else: # 안테나 저항이 50옴보다 클 때
-                tmp = np.sqrt((r_ant - z0) / z0)
-                # 이 경우에 맞는 매칭 추천
-                st.info("💡 안테나 자체 저항이 50Ω보다 큽니다. 기판 특성 및 선로를 재확인하거나 수동 매칭이 필요합니다.")
-                
-        # 5. 현재 스미스 차트 출력 (유저가 올린 S1P 상태 그대로 보여주기)
+                    req_shunt_l = -1 / (w_target * b_shunt) * 1e9
+                    st.success(f"✅ **추천 병렬 소자:** 인덕터(L) **{get_nearest_std(req_shunt_l)} nH** (계산값: {req_shunt_l:.2f}nH)")
+                    
+                # 직렬 소자 추천
+                req_serial_l = x_serial / w_target * 1e9
+                st.success(f"✅ **추천 직렬 소자:** 인덕터(L) **{get_nearest_std(req_serial_l)} nH** (계산값: {req_serial_l:.2f}nH)")
+
+        # 5. 현재 스미스 차트 출력
         st.subheader("📈 현재 상태 Smith Chart")
         fig, ax = plt.subplots(figsize=(6, 6))
-        
-        # 현재 측정된 스미스 차트 곡선 그리기
         ntwk_measured.plot_s_smith(ax=ax, linewidth=2, label="Measured S11")
         
-        # 유저가 지정한 목표 주파수 마커 표시 (현재 어디 찍혀있는지 확인)
         s_measured_marker = ntwk_measured.s[idx, 0, 0]
         ax.plot(s_measured_marker.real, s_measured_marker.imag, 'ro', markersize=8, label=f"Current Marker ({freq_mhz:.1f} MHz)")
         
         ax.legend()
         st.pyplot(fig)
         
-        st.info(f"ℹ️ 현재 {freq_mhz:.1f} MHz 마커 위치의 임피던스: Z = {z_measured_marker.real:.2f} + j({z_measured_marker.imag:.2f}) Ω (목표인 50 + j0 Ω에 가까울수록 좋습니다.)")
+        st.info(f"ℹ️ 현재 {freq_mhz:.1f} MHz 마커 위치의 임피던스: Z = {z_measured_marker.real:.2f} + j({z_measured_marker.imag:.2f}) Ω")
 
     except Exception as e:
         st.error(f"⚠️ 에러 발생: {e}")
