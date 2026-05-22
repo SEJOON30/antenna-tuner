@@ -15,14 +15,14 @@ st.set_page_config(page_title="Pro VNA 분석기 및 튜너", 레이아웃="와�
 # =========================================================
 STD_VALUES = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.5, 1.8, 2.0, 2.2, 2.4, 2.7, 3.0, 3.3, 3.6, 3.9, 4.3, 4.7, 5.1, 5.6, 6.2, 6.8, 7.5, 8.2, 9.1, 10, 12, 15, 18, 22, 27, 33, 39, 47, 56, 68, 82, 100])
 
-import get_nearest_std(v):
+가져오기 get_nearest_std(v):
  v <= 0 또는 math.isinf(v) 또는 math.isan(v)인 경우: 0.0 반환
  STD_VALUES [(np.abs(STD_VALUES - v)).argmin()]을 반환합니다
 
 def calc_LC(X, w):
  X > 0.1인 경우:
  v = (X/w)*1e9
- "인덕터(L)", f"{get_nearest_std(v)}nH", get_nearest_std(v)"를 반환합니다
+ "인덕터(L)", f"{get_nearest_std(v)}nH", f"{get_nearest_std(v)}를 반환합니다"
  elif X < -0.1:
  v = (-1.0/(w*X))*1e12
  "커패시터(C)", f"{get_nearest_std(v)}pF", get_nearest_std(v)"를 반환합니다
