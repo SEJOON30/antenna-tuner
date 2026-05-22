@@ -1,89 +1,88 @@
-import streamlit as st
-import skrf as rf
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
-import tempfile
-import os
-import math
-import pandas as pd
+st로 스트림된 가져오기
+rf로 skrf 가져오기
+numpy를 np로 가져오기
+matplotlib 가져오기.pyplot(plt)
+matplotlib 가져오기.티커로서의 티커
+임시 파일 가져오기
+os 가져오기
+가져오기 수학
+판다를 PD로 가져오기
 
-st.set_page_config(page_title="Pro VNA Analyzer & Tuner", layout="wide")
+st.set_page_config(page_title="Pro VNA 분석기 및 튜너", 레이아웃="와이드")
 
 # =========================================================
 # 1. 표준 소자값 필터링 및 RF 수학 엔진
 # =========================================================
 STD_VALUES = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.5, 1.8, 2.0, 2.2, 2.4, 2.7, 3.0, 3.3, 3.6, 3.9, 4.3, 4.7, 5.1, 5.6, 6.2, 6.8, 7.5, 8.2, 9.1, 10, 12, 15, 18, 22, 27, 33, 39, 47, 56, 68, 82, 100])
 
-def get_nearest_std(v):
-    if v <= 0 or math.isinf(v) or math.isnan(v): return 0.0
-    return STD_VALUES[(np.abs(STD_VALUES - v)).argmin()]
+import get_nearest_std(v):
+ v <= 0 또는 math.isinf(v) 또는 math.isan(v)인 경우: 0.0 반환
+ STD_VALUES [(np.abs(STD_VALUES - v)).argmin()]을 반환합니다
 
 def calc_LC(X, w):
-    if X > 0.1:
-        v = (X/w)*1e9
-        return "Inductor (L)", f"{get_nearest_std(v)}nH", get_nearest_std(v)
-    elif X < -0.1:
-        v = (-1.0/(w*X))*1e12
-        return "Capacitor (C)", f"{get_nearest_std(v)}pF", get_nearest_std(v)
-    return "None", "0", 0.0
+ X > 0.1인 경우:
+ v = (X/w)*1e9
+ "인덕터(L)", f"{get_nearest_std(v)}nH", get_nearest_std(v)"를 반환합니다
+ elif X < -0.1:
+ v = (-1.0/(w*X))*1e12
+ "커패시터(C)", f"{get_nearest_std(v)}pF", get_nearest_std(v)"를 반환합니다
+ "없음", "0", 0.0 반환
 
 # =========================================================
 # 2. 사이드바 (목표 주파수, 마커, 스케일)
 # =========================================================
-st.sidebar.title("🎛️ VNA 컨트롤 패널")
-use_sample = st.sidebar.checkbox("🧪 샘플 데이터 사용", value=True)
-uploaded_file = st.sidebar.file_uploader("📂 .s1p 업로드", type=['s1p'])
+세인트 sidebar title(" 🎛️ VNA 컨트롤 패널")
+사용_sample = st. sidebar.체크박스 ("🧪 샘플 데이터 사용", 값=True)
+업로드_파일 = st. sidebar.file_uploader("📂 .s1p 업로드", type=['s1p'])
 
-st.sidebar.markdown("---")
-st.sidebar.header("🎯 매칭 목표 주파수")
-target_f = st.sidebar.number_input("Target Freq (GHz)", value=2.45, step=0.01, help="이 주파수를 스미스차트 중앙(50Ω)으로 보냅니다.")
+성 sidebar.header("🎯 매칭 목표 주파수")
+target_f = st.sidebar.number_input("Target Freq (GHz)", 값=2.45, 단계=0.01, help="이 주파수를 스미스차트 중앙(ω(50 으로 보냅니다).")
 
-st.sidebar.header("🚩 관찰용 마커 (m1~m9)")
+성 sidebar.header("🚩 관찰용 마커 (m1~m9)")
 active_markers = {}
-for i in range(1, 10):
-    c_m1, c_m2 = st.sidebar.columns([1, 3])
-    if c_m1.checkbox(f"m{i}", value=(i==1), key=f"on{i}"):
-        active_markers[i] = c_m2.number_input(f"m{i} F", value=2.4+(i*0.05), step=0.01, key=f"f{i}", label_visibility="collapsed")
+i의 범위 (1, 10):
+ c_m1, c_m2 = st.sidebar.columns([1, 3])
+ if c_m1.checkbox(f"m{i}", value=(i==1), key=f"on{i}"):
+ 활성_markers[i] = c_m2.number_input(f"m{i} F", 값=2.4+(i*0.05), step=0.01, key=f"f{i}", label_visibility="collapsed")
 
-st.sidebar.header("📊 그래프 스케일 설정")
-x_start = st.sidebar.number_input("Start Freq (GHz)", value=2.0, step=0.1)
-x_stop = st.sidebar.number_input("Stop Freq (GHz)", value=3.0, step=0.1)
-x_step = st.sidebar.number_input("X-Axis Step (GHz)", value=0.2, step=0.05, min_value=0.01)
+성 sidebar.header("📊 그래프 스케일 설정")
+x_start = st.sidebar.number_input("Start Freq (GHz)), 값=2.0, step=0.1)
+x_stop = st.sidebar.number_input("Stop Freq (GHz)), 값=3.0, step=0.1)
+x_step = st.sidebar.number_input("X축 단계(GHz)", 값=0.2, 단계=0.05, min_value=0.01)
 
-y_max = st.sidebar.number_input("Y Max (dB)", value=0.0, step=5.0)
-y_min = st.sidebar.number_input("Y Min (dB)", value=-40.0, step=5.0)
-y_step = st.sidebar.number_input("Y-Axis Step (dB)", value=5.0, step=1.0, min_value=1.0)
+y_max = st.sidebar.number_input("Y Max (dB)), 값=0.0, 스텝=5.0)
+y_min = st.sidebar.number_input("Y Min (dB)), 값=-40.0, 단계=5.0)
+y_step = st.sidebar.number_input("Y축 단계(dB)", 값=5.0, 단계=1.0, min_value=1.0)
 
 # =========================================================
 # 3. 데이터 로드
 # =========================================================
-network_orig = None
-tmp_path = None  # ⭐ 에러의 원인 해결! 변수를 미리 생성해둡니다.
+network_orig = 없음
+tmp_path = None # ⭐ 에러의 원인 해결! 변수를 미리 생성해둡니다.
 
-if use_sample:
-    freq = rf.Frequency(x_start, x_stop, 401, 'ghz')
-    z_load = (15 + 3 * (freq.f/1e9)) + 1j * (40 + 80 * (freq.f/1e9 - 2.45))
-    network_orig = rf.Network(frequency=freq, s=((z_load-50)/(z_load+50)).reshape(-1,1,1))
-elif uploaded_file:
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".s1p") as tmp:
-        tmp.write(uploaded_file.getvalue())
-        tmp_path = tmp.name  # ⭐ 파일이 업로드 되면 경로를 저장합니다.
-        network_orig = rf.Network(tmp_path)
+사용하는 경우_sample:
+ 주파수 = RF.주파수(x_start, x_stop, 401, 'ghz')
+ z_load = (15 + 3 * (freq.f/1e9)) + 1j * (40 + 80 * (freq.f/1e9 - 2.45))
+ network_orig = rf.네트워크(주파수=freq, s=((z_load-50))/(z_load+50)).reshape(-1,1,1))
+elif 업로드_파일:
+ 임시 파일 포함.TMP로 명명된 임시 파일(delete=false, 접미사=.S1P"):
+ tmp.write(uploaded_file.getvalue ())
+ tmp_path = tmp.name # ⭐ 파일이 업로드 되면 경로를 저장합니다.
+ network_orig = rf.네트워크(tmp_path)
 
 # =========================================================
 # 4. 메인 화면 UI
 # =========================================================
-if network_orig:
-    st.title("📡 Pro VNA Analyzer & Tuner")
+만약 network_orig:
+ st.title("📡 Pro VNA 분석기 및 튜너")
 
-    idx_t = (np.abs(network_orig.f/1e9 - target_f)).argmin()
-    tz = network_orig.z[idx_t,0,0]
-    ts = network_orig.s[idx_t,0,0]
-    t_db = 20*np.log10(np.max([np.abs(ts), 1e-10]))
-    t_vswr = (1+np.abs(ts))/(1-np.abs(ts)) if np.abs(ts) < 0.99 else 99
+ idx_t = (np.abs(network_orig.f/1e9 - target_f)).argmin ()
+ tz = network_orig.z[idx_t,0,0]
+ ts = network_orig.s[idx_t,0,0]
+ t_db = 20*np.log10(np.max([np.abs(ts), 1e-10]))
+ t_vswr = (1+np.abs(ts))/(1-np.abs(ts)) if np.abs(ts) < 0.99 else 99
 
-    st.header(f"📌 단계 1: Default 상태")
+ st.header(f"📌 단계 1: 기본 상태")
     st.success(f"**★ Target ({target_f} GHz)** | S11: **{t_db:.2f} dB** | VSWR: **{t_vswr:.2f}** | Z: **{tz.real:.1f}{tz.imag:+.1f}j Ω**")
 
     col1, col2 = st.columns(2)
