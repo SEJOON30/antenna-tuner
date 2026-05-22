@@ -2,6 +2,7 @@ import streamlit as st
 import skrf as rf
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
 # 1. 표준 소자 값 리스트 (엔지니어링 표준 수치)
 STD_VALUES = [
@@ -21,7 +22,7 @@ def get_nearest_std(val):
 
 # 앱 제목 및 소개
 st.title("📡 안테나 실전 스마트 멀티밴드 튜닝 시스템")
-st.write("기존 소자를 빼고 새 소자를 넣었을 때, 최대 3개의 멀티 밴드(주파수) 마커가 스미스차트에서 어떻게 움직이는지 실시간으로 검증하세요.")
+st.write("기존 소자를 빼고 새 소자를 넣었을 때, 최대 3개의 멀티 밴드 마커가 스미스차트에서 어떻게 움직이는지 실시간으로 검증하세요.")
 
 # 2. 파일 업로더
 uploaded_file = st.file_uploader("측정된 안테나 S1P 파일을 선택하세요", type=None)
@@ -35,23 +36,50 @@ if uploaded_file is not None:
         
         ntwk_measured = rf.Network("temp.s1p")
         
+        # 원본 파일 주파수 정보 한계점 파악
+        file_min_f = float(ntwk_measured.f[0] / 1e6)
+        file_max_f = float(ntwk_measured.f[-1] / 1e6)
+
         st.subheader("📊 안테나 기본 정보")
-        min_f_mhz = float(ntwk_measured.f[0] / 1e6)
-        max_f_mhz = float(ntwk_measured.f[-1] / 1e6)
-        st.write(f"**측정 주파수 범위:** {min_f_mhz:.1f} MHz ~ {max_f_mhz:.1f} MHz")
+        st.write(f"**S1P 파일 원본 주파수 범위:** {file_min_f:.1f} MHz ~ {file_max_f:.1f} MHz")
+
+        # ---------------------------------------------
+        # 🔍 [핵심 추가] 관찰할 스미스차트 주파수 범위 설정 (Start / Stop)
+        # ---------------------------------------------
+        st.subheader("🔍 관찰할 스미스 차트 주파수 범위 설정 (S1P 범위 내에서 입력)")
+        col_range1, col_range2 = st.columns(2)
+        with col_range1:
+            start_f_mhz = st.number_input(
+                "시작 주파수 (Start MHz)", 
+                min_value=file_min_f, 
+                max_value=file_max_f, 
+                value=file_min_f, 
+                step=1.0,
+                format="%.1f"
+            )
+        with col_range2:
+            stop_f_mhz = st.number_input(
+                "종료 주파수 (Stop MHz)", 
+                min_value=file_min_f, 
+                max_value=file_max_f, 
+                value=file_max_f, 
+                step=1.0,
+                format="%.1f"
+            )
+            
+        if start_f_mhz >= stop_f_mhz:
+            st.error("⚠️ 시작 주파수는 종료 주파수보다 작아야 합니다!")
+            st.stop()
 
         # 3. 멀티 주파수 마커 설정 (최대 3개)
         st.subheader("🎯 관찰할 목표 마커 주파수 설정 (최대 3개)")
-        
-        # 몇 개의 밴드를 볼 것인지 선택
         num_markers = st.radio("관찰할 밴드(주파수) 개수", [1, 2, 3], index=0, horizontal=True)
         
         freq_list = []
-        # 기본값 분할 지정
         default_freqs = [
-            (min_f_mhz + max_f_mhz) / 2,
-            min_f_mhz + (max_f_mhz - min_f_mhz) * 0.3,
-            min_f_mhz + (max_f_mhz - min_f_mhz) * 0.7
+            (start_f_mhz + stop_f_mhz) / 2,
+            start_f_mhz + (stop_f_mhz - start_f_mhz) * 0.3,
+            start_f_mhz + (stop_f_mhz - start_f_mhz) * 0.7
         ]
         
         cols_freq = st.columns(num_markers)
@@ -59,8 +87,8 @@ if uploaded_file is not None:
             with cols_freq[i]:
                 f_val = st.number_input(
                     f"마커 #{i+1} 주파수 (MHz)",
-                    min_value=min_f_mhz,
-                    max_value=max_f_mhz,
+                    min_value=file_min_f,
+                    max_value=file_max_f,
                     value=round(default_freqs[i], 1),
                     step=0.1,
                     format="%.1f",
@@ -123,19 +151,18 @@ if uploaded_file is not None:
         if r_ant <= 0:
             st.warning("⚠️ 안테나 저항이 비정상적입니다. 소자 값을 확인해 주세요.")
         else:
-            if r_ant <= z0:  # 안테나 저항 < 50옴 (직렬 후 병렬 구조)
+            if r_ant <= z0:
                 tmp = np.sqrt((z0 - r_ant) / r_ant)
                 x_shunt = z0 / tmp
                 x_serial = x_ant + r_ant * tmp
                 req_shunt_c = 1 / (w_target_ref * x_shunt) * 1e12
-                
                 if x_serial >= 0:
                     req_serial_l = x_serial / w_target_ref * 1e9
                     st.success(f"🔥 추천 튜닝 ({freq_list[0]:.1f} MHz 기준) ➡️ **[직렬] 인덕터(L) {get_nearest_std(req_serial_l)} nH** / **[병렬] 커패시터(C) {get_nearest_std(req_shunt_c)} pF**")
                 else:
                     req_serial_c = -1 / (w_target_ref * x_serial) * 1e12
                     st.success(f"🔥 추천 튜닝 ({freq_list[0]:.1f} MHz 기준) ➡️ **[직렬] 커패시터(C) {get_nearest_std(req_serial_c)} pF** / **[병렬] 커패시터(C) {get_nearest_std(req_shunt_c)} pF**")
-            else:  # 안테나 저항 > 50옴 (병렬 후 직렬 구조)
+            else:
                 g_ant = 1 / r_ant
                 b_ant = -x_ant / (r_ant**2 + x_ant**2)
                 g0 = 1 / z0
@@ -143,7 +170,6 @@ if uploaded_file is not None:
                 b_shunt = g_ant * tmp - b_ant
                 x_serial = 1 / (g0 * tmp)
                 req_serial_l = x_serial / w_target_ref * 1e9
-                
                 if b_shunt >= 0:
                     req_shunt_c = b_shunt / w_target_ref * 1e12
                     st.success(f"🔥 추천 튜닝 ({freq_list[0]:.1f} MHz 기준) ➡️ **[직렬] 인덕터(L) {get_nearest_std(req_serial_l)} nH** / **[병렬] 커패시터(C) {get_nearest_std(req_shunt_c)} pF**")
@@ -193,22 +219,25 @@ if uploaded_file is not None:
             z_tuned = 1 / y_tuned
 
         s_tuned = (z_tuned - z0) / (z_tuned + z0)
-        ntwk_tuned = ntwk_measured.copy()
-        ntwk_tuned.s[:, 0, 0] = s_tuned
+        
+        # 주파수 필터링을 적용하기 위해 새로운 네트워크 슬라이싱 처리
+        ntwk_measured_filtered = ntwk_measured[f"{start_f_mhz}mhz-{stop_f_mhz}mhz"]
+        
+        # 튜닝된 데이터를 임시 네트워크 객체로 랩핑하여 필요한 구간만 슬라이싱
+        ntwk_tuned_full = ntwk_measured.copy()
+        ntwk_tuned_full.s[:, 0, 0] = s_tuned
+        ntwk_tuned_filtered = ntwk_tuned_full[f"{start_f_mhz}mhz-{stop_f_mhz}mhz"]
 
         # ---------------------------------------------
         # 🎯 주파수별 데이터 수집 및 테이블 출력
         # ---------------------------------------------
         st.subheader("🎯 주파수 마커별 실시간 임피던스(Z) 수치 결과")
         
-        marker_colors = ['#FF1493', '#00FF00', '#00FFFF'] # 딥핑크, 라임그린, 시안 (차트 가독성용)
-        marker_symbols_meas = ['X', 's', '^'] # 원래 마커 형태
-        marker_symbols_tune = ['o', 'D', 'v'] # 변경 후 마커 형태
+        marker_colors = ['#FF1493', '#00FF00', '#00FFFF']
+        marker_symbols_meas = ['X', 's', '^']
+        marker_symbols_tune = ['o', 'D', 'v']
         
-        import pandas as pd
         data_rows = []
-        
-        # 차트용 마커 좌표를 담아둘 리스트
         marker_points = []
 
         for idx_m, f_mhz in enumerate(freq_list):
@@ -217,9 +246,8 @@ if uploaded_file is not None:
             z_m = z_measured[idx_f]
             z_t = z_tuned[idx_f]
             s_m = ntwk_measured.s[idx_f, 0, 0]
-            s_t = ntwk_tuned.s[idx_f, 0, 0]
+            s_t = ntwk_tuned_full.s[idx_f, 0, 0]
             
-            # 표에 넣을 데이터 포맷팅
             data_rows.append({
                 "마커 번호": f"Marker #{idx_m+1}",
                 "주파수 (MHz)": f"{f_mhz:.1f}",
@@ -233,27 +261,24 @@ if uploaded_file is not None:
                 'freq_str': f"{f_mhz:.1f}MHz"
             })
             
-        # 데이터프레임 시각화
         df_result = pd.DataFrame(data_rows)
         st.table(df_result)
 
-        # 6. 스미스 차트 시각화
-        st.subheader("📈 Smith Chart (💡 점선: 측정 당시 / 실선: 소자 변경 후)")
+        # 6. 스미스 차트 시각화 (사용자 범위 지정 반영)
+        st.subheader(f"📈 Smith Chart ({start_f_mhz:.1f} MHz ~ {stop_f_mhz:.1f} MHz 구간 확대)")
         fig, ax = plt.subplots(figsize=(7, 7))
         
-        # 전체 궤적 그리기
-        ntwk_measured.plot_s_smith(ax=ax, linestyle='--', alpha=0.4, label="Measured Trace")
-        ntwk_tuned.plot_s_smith(ax=ax, linewidth=2, label="Tuned Trace")
+        # 설정한 범위의 구간 궤적만 드로잉
+        ntwk_measured_filtered.plot_s_smith(ax=ax, linestyle='--', alpha=0.5, label="Measured Trace (Range)")
+        ntwk_tuned_filtered.plot_s_smith(ax=ax, linewidth=2, label="Tuned Trace (Range)")
         
-        # 개별 마커 찍어주기
+        # 지정 마커 맵핑
         for i, pt in enumerate(marker_points):
             color = marker_colors[i]
-            # 측정 원래 위치 마커 ('X')
             ax.plot(pt['s_meas'].real, pt['s_meas'].imag, marker=marker_symbols_meas[i], 
                     color=color, markersize=8, markeredgecolor='black', linestyle='None',
                     label=f"M#{i+1} Original ({pt['freq_str']})")
             
-            # 튜닝 소자 반영 후 이동된 위치 마커 ('o' 원형 등)
             ax.plot(pt['s_tune'].real, pt['s_tune'].imag, marker=marker_symbols_tune[i], 
                     color=color, markersize=10, markeredgecolor='black', linestyle='None',
                     label=f"M#{i+1} Tuned ({pt['freq_str']})")
